@@ -1,6 +1,9 @@
+include("utils.js")
+
 var game = new Object()
 var existsGame = false;
 var dbName = "hangman.db"
+
 Array.prototype.includes = function (n) {
     for (var i = 0; i < this.length; i++) {
         if (this[i] == n) return true
@@ -14,9 +17,9 @@ function onHelp(userobj) {
 
 function onLoad() {
     if (initDatabaseQuery())
-        print("\x0302Juego del Ahorcado by nokia - \x06v1.3.1")
+        log(null, "by " + scriptAuthor + " - \x06" + scriptVersion)
     else
-        print("\x0304\x06Error al cargar script Juego del Ahorcado v1.3.1")
+        log(null, "\x0304\x06Error al cargar script " + scriptVersion)
 }
 
 function onPart(userobj) {
@@ -27,51 +30,58 @@ function onPart(userobj) {
     log(null, "\x0304" + userobj.name + " ha abandonado la partida, " + numPlayers + " jugador(es)")
     if (numPlayers < 2) {
         log(null, "\x0304Se termina la partida por falta de jugadores")
-        endGame()
+        endGame(false)
     }
 }
 
-function onCommand(userobj, cmd, target, args) {
-    switch (true) {
-        case cmd.indexOf("helpahorcado") == 0:
-            help(userobj)
-            break
-        case cmd.indexOf("nuevojuego") == 0:
-            if (existsGame) {
-                log(null, "Ya existe una partida creada por " + user(game.owner).name)
-                return
-            }
+var commands = {
+    "helpahorcado": function (userobj) {
+        help(userobj)
+    },
+    "nuevojuego": function (userobj, command) {
+        if (existsGame && userobj.id != game.owner) {
+            log(null, "Ya existe una partida creada por " + user(game.owner).name)
+            return
+        }
+        if (!existsGame) {
             initGame()
             game.owner = userobj.id
             log(null, "Nueva partida creada por " + userobj.name)
             existsGame = true;
-            break
-        case cmd.indexOf("palabrajuego") == 0:
-            setWordGame(userobj, cmd)
-            break
-        case cmd.indexOf("aleatoriojuego") == 0:
+        }
+        var args = command.split(" ")
+        if (args.length == 1)
             loadRandomWord(userobj)
-            break
-        case cmd.indexOf("entrarjuego") == 0:
-            addPlayer(userobj)
-            break
-        case cmd.indexOf("empezarjuego") == 0:
-            startGame(userobj)
-            break
-        case cmd.indexOf("terminarjuego") == 0:
-            if (!existsGame) {
-                log(null, "No se ha creado una partida")
-                return
-            }
-            if (userobj.id != game.owner) {
-                log(null, "\x0304Solo el anfitrión de la partida puede terminarla")
-                return
-            }
-            endGame()
+        else
+            setWordGame(userobj, args[1])
+    },
+    "entrarjuego": function (userobj, args) {
+        addPlayer(userobj)
+    },
+    "empezarjuego": function (userobj, args) {
+        startGame(userobj)
+    },
+    "terminarjuego": function (userobj, args) {
+        if (!existsGame) {
+            log(null, "No se ha creado una partida")
             return
-        case cmd.indexOf("historialjuego") == 0:
-            showHistorysQuery(userobj)
-            break
+        }
+        if (userobj.id != game.owner) {
+            log(null, "\x0304Solo el anfitrión de la partida puede terminarla")
+            return
+        }
+        endGame(false)
+    },
+    "historialjuego": function (userobj, args) {
+        showHistorysQuery(userobj)
+    }
+}
+
+function onCommand(userobj, command, target, args) {
+    var cmd = command.split(" ")[0];
+    cmd = cmd.toLowerCase();
+    if (cmd in commands) {
+        commands[cmd](userobj, command)
     }
 }
 
@@ -83,7 +93,7 @@ function onTextAfter(userobj, txt) {
     var numPlayers = playersArray.length
     var text = txt.replace(/\x06|\x09|\x07|\x03[0-9]{2}|\x05[0-9]{2}/g, "");
     text = text.toLowerCase()
-    if (text.indexOf("?") == 0 || game.wordCompleted) {
+    if (text.indexOf("?") == 0) {
         if (!playersArray.includes(userobj.id)) {
             log(userobj, userobj.name + " no estás jugando")
             return
@@ -110,10 +120,11 @@ function onTextAfter(userobj, txt) {
             game.currentPositon = 0
         if (!game.usedChars.includes(text)) {
             game.usedChars.push(text)
-            validateChar(text, userobj)
+            if (!validateChar(text, userobj))
+                return
         } else
             log(null, "\x06" + userobj.name + " \x0304\x06ya se usó la letra \x06" + text)
-        playGame()
+        playGame(userobj)
     }
 }
 
@@ -159,7 +170,6 @@ function initGame() {
     game.owner = null
     game.errors = new Object()
     game.ownerCanPlay = false
-    game.wordCompleted = false
 }
 
 function setWordGame(userobj, cmd) {
@@ -175,8 +185,7 @@ function setWordGame(userobj, cmd) {
         log(userobj, "No se puede cambiar la palabra una vez que se inició la partida")
         return
     }
-    var text = cmd.replace(/\x06|\x09|\x07|\x03[0-9]{2}|\x05[0-9]{2}/g, "");
-    var word = text.split(" ")[1]
+    var word = cmd.replace(/\x06|\x09|\x07|\x03[0-9]{2}|\x05[0-9]{2}/g, "");
     if (!word || word == "") {
         log(userobj, "Palabra inválida")
         return
@@ -207,18 +216,10 @@ function tryWord(userobj, word) {
         game.points[userobj.id] = game.points[userobj.id] + 5
         log(null, "(H) \x0310\x06" + userobj.name + " \x06\x0302adivinó la palabra (H), la palabra era \x06\x0304" + word)
         game.winner = userobj.id
-        endGame()
+        endGame(true)
         return
     } else {
         log(null, userobj.name + " buen intento, pero \x06\x0304" + word + "\x06\x0302 no es la palabra")
-        if (game.wordCompleted) {
-            game.currentPositon = game.currentPositon + 1
-            var playersArray = Object.keys(game.players)
-            var numPlayers = playersArray.length
-            if (game.currentPositon >= numPlayers)
-                game.currentPositon = 0
-            playGame()
-        }
     }
 }
 
@@ -276,19 +277,20 @@ function startGame(userobj) {
     playGame()
 }
 
-function playGame() {
+function playGame(userobj) {
     var playersArray = Object.keys(game.players)
     var playerSelected = playersArray[game.currentPositon]
     var currentWord = showWord()
     if (currentWord == game.word) {
-        game.wordCompleted = true
-        log(null, "\x0310\x06" + game.players[playerSelected].name + "\x06\x0302 no quedan más letras, intenta adivinar la palabra")
+        log(null, "(H) \x0310\x06" + userobj.name + " \x06\x0302completó la palabra (H), la palabra era \x06\x0304" + game.word)
+        game.winner = userobj.id
+        endGame(true)
     } else {
         log(null, "\x0310\x06" + game.players[playerSelected].name + "\x06\x0302 es tu turno, arroja una letra")
     }
 }
 
-function showPoints() {
+function showPoints(wordWasGuessed) {
     var playersArray = Object.keys(game.historyPlayers)
     log(null, "Puntajes:")
     var maxPoints = 0;
@@ -305,8 +307,13 @@ function showPoints() {
     var winnerPoints = getPoints(maxPoints)
     if (winnerId == null)
         log(null, "Nadie ganó la partida")
-    else
-        log(null, "Ganador de la partida: (H)(H)(H) \x06" + game.historyPlayers[winnerId].name + " (H)(H)(H), \x06Puntaje final: " + winnerPoints)
+    else {
+        if (wordWasGuessed)
+            log(null, "Ganador de la partida: (H)(H)(H) \x06" + game.historyPlayers[winnerId].name + " (H)(H)(H), \x06Puntaje final: " + winnerPoints)
+        else
+            log(null, "Nadie ganó la partida")
+    }
+
 }
 
 function getPoints(points) {
@@ -358,53 +365,39 @@ function validateChar(text, userobj) {
             else if (game.currentPositon >= numPlayers)
                 game.currentPositon = 0
             if (numPlayers == 0) {
-                log(null, "\x0301Fin del juego, nadie adivinó la palabra, la palabra era \x06" + game.word)
-                endGame()
-                return
+                endGame(false)
+                return false
             }
         }
     }
+    return true
 }
 
-function endGame() {
+function endGame(wordWasGuessed) {
     existsGame = false
-    showPoints()
+    if (!wordWasGuessed)
+        log(null, "\x0301Fin del juego, nadie adivinó la palabra, la palabra era \x06" + game.word)
+    showPoints(wordWasGuessed)
     updateHistorys()
     initGame()
     log(null, "Partida terminada")
 }
 
 function updateUserQuery(user, player) {
-    var queryString = "UPDATE games SET total_points = {0}, won_games = {1} WHERE userid = {2}"
     var points = parseInt(user.total_points) + parseInt(game.points[player.id])
     var wonGames = parseInt(user.won_games)
     if (game.winner == player.id)
         wonGames = parseInt(user.won_games) + 1
-    var query = new Query(queryString, points, wonGames, player.guid)
-    var sql = new Sql()
-    sql.open(dbName)
-    if (sql.connected) {
-        sql.query(query)
-        sql.close()
-    } else {
-        log(null, "\x0304\x06Error al conectar con la base de datos:\x06" + sql.lastError)
-    }
+    var updateQuery = new Query("UPDATE games SET total_points = {0}, won_games = {1} WHERE userid = {2}", points, wonGames, player.guid)
+    query(updateQuery, dbName, null)
 }
 
 function insertUserQuery(user) {
-    var queryString = "INSERT INTO games (userid, user, total_points, won_games) VALUES ({0}, {1}, {2}, {3})"
     var wonGames = 0
     if (game.winner == user.id)
         wonGames = 1
-    var query = new Query(queryString, user.guid, user.name, game.points[user.id], wonGames)
-    var sql = new Sql()
-    sql.open(dbName)
-    if (sql.connected) {
-        sql.query(query)
-        sql.close()
-    } else {
-        log(null, "\x0304\x06Error al conectar con la base de datos:\x06" + sql.lastError)
-    }
+    var insertQuery = new Query("INSERT INTO games (userid, user, total_points, won_games) VALUES ({0}, {1}, {2}, {3})", user.guid, user.name, game.points[user.id], wonGames)
+    query(insertQuery, dbName, null)
 }
 
 function updateHistorys() {
@@ -424,12 +417,8 @@ function updateHistorys() {
 
 function showHistorysQuery(userobj) {
     log(userobj, "Historial de partidas - Top 10")
-    var queryString = "SELECT * FROM games ORDER BY won_games DESC LIMIT 10"
-    var query = new Query(queryString)
-    var sql = new Sql()
-    sql.open(dbName)
-    if (sql.connected) {
-        sql.query(query)
+    var selectQuery = new Query("SELECT * FROM games ORDER BY total_points DESC LIMIT 10")
+    query(selectQuery, dbName, function (sql) {
         var i = 1
         while (sql.read) {
             var user = new Object()
@@ -438,23 +427,16 @@ function showHistorysQuery(userobj) {
             user.user = sql.value("user")
             user.total_points = parseInt(sql.value("total_points"))
             user.won_games = parseInt(sql.value("won_games"))
-            log(userobj, "\x0302" + i + ". \x06" + user.user + ": " + user.won_games + " \x06partidas ganadas, \x06" + user.total_points + " \x06puntos")
+            log(userobj, "\x0302" + i + ". \x06" + user.user + ": " + user.total_points + " \x06puntos, \x06" + user.won_games + " \x06partidas ganadas")
             i++
         }
-        sql.close()
-    } else {
-        log(null, "\x0304\x06Error al conectar con la base de datos:\x06" + sql.lastError)
-    }
+    })
 }
 
 function getUserQuery(userid) {
-    var queryString = "SELECT * FROM games WHERE userid = {0}"
-    var query = new Query(queryString, userid)
-    var sql = new Sql()
+    var userQuery = new Query("SELECT * FROM games WHERE userid = {0}", userid)
     var user = new Object()
-    sql.open(dbName)
-    if (sql.connected) {
-        sql.query(query)
+    query(userQuery, dbName, function (sql) {
         while (sql.read) {
             user.id = sql.value("id")
             user.userid = sql.value("userid")
@@ -462,55 +444,28 @@ function getUserQuery(userid) {
             user.total_points = parseInt(sql.value("total_points"))
             user.won_games = parseInt(sql.value("won_games"))
         }
-        sql.close()
-    } else {
-        log(null, "\x0304\x06Error al conectar con la base de datos:\x06" + sql.lastError)
-    }
+    })
     return user
 }
 
 function help(userobj) {
-    print(userobj, "#nuevojuego")
+    print(userobj, "#nuevojuego palabra | Para crear una partida, la palabra es opcional y debe tener mínimo 5 letras")
+    print(userobj, "Si no se configura una palabra, se cargará una palabra aleatoria")
     print(userobj, "#empezarjuego")
     print(userobj, "#terminarjuego")
     print(userobj, "#historialjuego | Para ver el historial de partidas")
-    print(userobj, "#palabrajuego palabra | Para configurar la palabra, 5 letras mínimo")
-    print(userobj, "#aleatoriojuego | Para configurar una palabra aleatoria")
     print(userobj, "?palabra | Para adivinar la palabra")
     print(userobj, "#entrarjuego | Para unirse a la partida")
 }
 
-function log(userobj, text) {
-    if (!userobj)
-        print("\x0302\x06Juego del Ahorcado\x06 | " + text)
-    else
-        print(userobj, "\x0302\x06Juego del Ahorcado\x06 | " + text)
-}
-
 function dropDatabaseQuery() {
-    var queryString = "DROP TABLE IF EXISTS games"
-    var query = new Query(queryString)
-    var sql = new Sql()
-    sql.open(dbName)
-    if (sql.connected) {
-        sql.query(query)
-        sql.close()
-        return true
-    }
-    return false
+    var dropQuery = new Query("DROP TABLE IF EXISTS games")
+    return query(dropQuery, dbName)
 }
 
 function initDatabaseQuery() {
-    var queryString = "CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, user TEXT NOT NULL, userid TEXT NOT NULL, total_points INTEGER NOT NULL, won_games INTEGER NOT NULL)"
-    var query = new Query(queryString)
-    var sql = new Sql()
-    sql.open(dbName)
-    if (sql.connected) {
-        sql.query(query)
-        sql.close()
-        return true
-    }
-    return false
+    var initQuery = new Query("CREATE TABLE IF NOT EXISTS games (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, user TEXT NOT NULL, userid TEXT NOT NULL, total_points INTEGER NOT NULL, won_games INTEGER NOT NULL)")
+    return query(initQuery, dbName)
 }
 
 function resetDatabase() {
